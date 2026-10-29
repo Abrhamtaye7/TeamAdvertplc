@@ -1,0 +1,43 @@
+<resources>
+    <string name="app_name">ChessCam</string>
+    <string name="rotate">Rotate a1</string>
+    <string name="start">Start game</string>
+    <string name="continue_game">Continue game</string>
+    <string name="pause">Pause</string>
+    <string name="resume">Resume</string>
+    <string name="undo">Undo</string>
+    <string name="repeat">Repeat</string>
+    <string name="resync">Re-sync</string>
+    <string name="more">More</string>
+    <string name="done">Done</string>
+    <string name="i_play_white">I play White</string>
+    <string name="i_play_black">I play Black</string>
+
+    <string name="menu_adjust">Adjust corners</string>
+    <string name="menu_new_game">New game</string>
+    <string name="menu_settings">Settings</string>
+    <string name="menu_share">Share PGN</string>
+    <string name="menu_help">How to use</string>
+
+    <string name="setup_hint">Put the phone on a stand looking down at the board. Drag the 4 yellow dots onto the outer corners of the 64 squares. a1 is the corner on White\'s left. If the labels are on the wrong corners, tap Rotate a1. Then tap Start game.</string>
+    <string name="adjust_hint">Drag the dots onto the board corners, then tap Done.</string>
+    <string name="tracking_hint">Keep hands off the board between moves. The red squares show what the camera thinks changed.</string>
+    <string name="paused_hint">Paused. Make the real board match the diagram, then tap Resume.</string>
+    <string name="camera_denied">ChessCam needs the camera to watch the board. Allow camera access in Android Settings, then reopen the app.</string>
+    <string name="engine_missing">The Stockfish engine is missing from this build, so no moves can be suggested. Board tracking still works.</string>
+
+    <string name="think_time">Engine think time</string>
+    <string name="voice">Speak moves</string>
+    <string name="announce_opponent">Say the moves the camera sees</string>
+    <string name="show_changes">Show changed squares</string>
+    <string name="sensitivity">Detection sensitivity: %1$d%%</string>
+    <string name="start_fen">Starting position (FEN)</string>
+    <string name="start_fen_hint">Empty = normal starting position</string>
+    <string name="bad_fen">That starting position is not valid: %1$s</string>
+    <string name="new_game_confirm">Start a new game? The current game will be cleared.</string>
+    <string name="promote_to">Promote to</string>
+    <string name="help_title">How to use ChessCam</string>
+    <string name="help_text">1. Mount the phone above the board (a tripod or phone stand). The more straight-down the view, the better.\n\n2. Drag the yellow dots onto the 4 outer corners of the board squares. Check the labels: a1 must be on White\'s left. Use Rotate a1 if needed.\n\n3. Choose your colour and tap Start game with all pieces in place.\n\n4. Play normally. Take your hand away after each move. ChessCam spots the move, and on your turn Stockfish says the best reply and draws it as an arrow.\n\n5. If a move is missed or wrong, tap Undo, or tap the move\'s squares on the small board to enter it yourself. Re-sync tells the app the real board is correct as it is now.\n\nGood light and no shadows moving across the board help a lot.</string>
+    <string name="ok">OK</string>
+    <string name="cancel">Cancel</string>
+</resources>

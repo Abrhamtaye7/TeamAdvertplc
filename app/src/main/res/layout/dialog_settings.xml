@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingHorizontal="24dp"
+        android:paddingTop="12dp">
+
+        <TextView
+            style="@style/SettingLabel"
+            android:text="@string/think_time" />
+
+        <Spinner
+            android:id="@+id/thinkTime"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/voice"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/voice" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/announceOpponent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/announce_opponent" />
+
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/showChanges"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/show_changes" />
+
+        <TextView
+            android:id="@+id/sensitivityLabel"
+            style="@style/SettingLabel" />
+
+        <SeekBar
+            android:id="@+id/sensitivity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="15" />
+
+        <TextView
+            style="@style/SettingLabel"
+            android:text="@string/start_fen" />
+
+        <EditText
+            android:id="@+id/startFen"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/start_fen_hint"
+            android:importantForAutofill="no"
+            android:inputType="text"
+            android:textSize="13sp" />
+    </LinearLayout>
+</ScrollView>

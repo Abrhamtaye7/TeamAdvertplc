@@ -1,0 +1,38 @@
+name: Build APK
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: actions/cache@v4
+        with:
+          path: build/stockfish-sf_19
+          key: stockfish-sf_19-${{ hashFiles('scripts/build-stockfish.sh') }}
+
+      - name: Build Stockfish for Android
+        # Stockfish needs NDK r27c or newer; the runner image ships several.
+        run: ANDROID_NDK_HOME="$ANDROID_NDK_LATEST_HOME" scripts/build-stockfish.sh
+
+      - name: Unit tests
+        run: ./gradlew --no-daemon testReleaseUnitTest
+
+      - name: Build APK
+        run: ./gradlew --no-daemon assembleRelease
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ChessCam-apk
+          path: app/build/outputs/apk/release/*.apk
