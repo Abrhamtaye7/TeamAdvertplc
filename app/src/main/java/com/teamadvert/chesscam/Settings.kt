@@ -20,6 +20,16 @@ class Settings(context: Context) {
         get() = prefs.getBoolean("voice", true)
         set(v) = prefs.edit().putBoolean("voice", v).apply()
 
+    /** Speak moves while the floating overlay is on (off by default: the overlay shows colors). */
+    var overlayVoice: Boolean
+        get() = prefs.getBoolean("overlayVoice", false)
+        set(v) = prefs.edit().putBoolean("overlayVoice", v).apply()
+
+    /** How strongly the overlay's colors are drawn, 0.2..1. */
+    var overlayOpacity: Float
+        get() = prefs.getFloat("overlayOpacity", 0.6f)
+        set(v) = prefs.edit().putFloat("overlayOpacity", v).apply()
+
     var announceOpponent: Boolean
         get() = prefs.getBoolean("announceOpponent", true)
         set(v) = prefs.edit().putBoolean("announceOpponent", v).apply()

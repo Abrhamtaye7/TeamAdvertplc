@@ -28,6 +28,26 @@ Everything runs on the phone: no internet, no account, no API costs.
    - **Repeat** says the last line again.
 6. **More** has Adjust corners, New game, Settings, Share PGN and help.
 
+### Overlay
+
+**Overlay** keeps ChessCam following the game while you use another app.
+
+- **Permission.** The first time, Android asks you to allow **Display over other apps** for ChessCam. Then ChessCam goes to the background and a see-through board covers the screen. It doesn't take touches, so the app underneath works normally.
+- **Squares:**
+  - **Yellow:** the piece to move.
+  - **Green:** where it goes.
+  - **Faint blue:** the opponent's last move, so you can check it was read correctly.
+  - The overlay board is drawn from your side.
+- **The frame around the screen shows the status:**
+  - **Green:** your move is shown.
+  - **Amber:** thinking.
+  - **Grey:** waiting for the opponent.
+  - **Red:** lost track of the board (use **Re-sync**).
+  - **Purple:** the game is over.
+- **Controls.** The notification has **Undo**, **Re-sync / Resume** and **Stop**. Opening ChessCam again ends the overlay.
+- **Voice.** It is off while the overlay is on. Settings can turn it back on and change how strongly the colors are drawn.
+- **Android indicators.** While the overlay runs, Android shows the notification and the green camera-in-use dot. Apps can't hide these.
+
 The game is saved as you go, so closing the app doesn't lose it. **Share PGN** exports the game for any chess app.
 
 **Settings:**
@@ -49,6 +69,7 @@ The game is saved as you go, so closing the app doesn't lose it. **Share PGN** e
   - If both players move before the board is still, it tries pairs of moves.
   - If nothing fits for a few seconds it says "Lost track of the board."
 - **Camera angle.** Seen at an angle, an upright piece also covers part of the square behind it. The detector works out from the corner positions which square is "behind" each square on camera. It counts the camera-side part of each square less, and treats a moved piece's "lean" into the next square as expected.
+- **App structure.** `GameSession` holds the game, tracker, engine and speech, so it keeps running when the screen is closed. `MainActivity` and `OverlayService` are two views onto it. The service is a camera foreground service that draws `ui/OverlayIndicatorView` as a `TYPE_APPLICATION_OVERLAY` window.
 - **Engine.** Stockfish 19 is compiled for ARM64 with the NDK and shipped inside the APK as `libstockfish.so`, so Android installs it where apps are allowed to run executables. The app talks to it over UCI (`engine/UciEngine.kt`) with `go movetime`.
 - **Chess rules.** `chess/` has its own move generator, verified with standard perft counts in the unit tests. It covers SAN, FEN, check, mate, stalemate, repetition, the fifty-move rule and insufficient material.
 

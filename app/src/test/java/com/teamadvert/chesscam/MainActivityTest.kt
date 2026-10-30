@@ -21,6 +21,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowDialog
 import org.robolectric.shadows.ShadowLooper
+import org.robolectric.shadows.ShadowSettings
 
 /** Starts the real activity (without camera or engine) and walks through the main buttons. */
 @RunWith(RobolectricTestRunner::class)
@@ -82,15 +83,42 @@ class MainActivityTest {
                 (ShadowDialog.getLatestDialog() as AlertDialog).getButton(AlertDialog.BUTTON_POSITIVE).performClick()
                 call(a, "showHelp")
                 a.findViewById<View>(R.id.startButton).performClick()
-                call(a, "startAdjusting")
+                val session = GameSession.get(a)
+                session.setAdjusting(true)
                 assertEquals(View.VISIBLE, a.findViewById<View>(R.id.rotateButton).visibility)
-                call(a, "finishAdjusting")
+                session.setAdjusting(false)
                 assertEquals(View.GONE, a.findViewById<View>(R.id.rotateButton).visibility)
                 call(a, "confirmNewGame")
                 assertEquals(View.VISIBLE, a.findViewById<View>(R.id.startButton).visibility)
                 call(a, "sharePgn")
                 a.findViewById<View>(R.id.moreButton).performClick()
                 ShadowLooper.idleMainLooper()
+            }
+        }
+    }
+
+    @Test fun overlayAsksForPermissionThenStartsTheService() {
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        shadowOf(app).grantPermissions(Manifest.permission.CAMERA, Manifest.permission.POST_NOTIFICATIONS)
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.onActivity { a ->
+                a.onFrame(Bitmap.createBitmap(960, 1280, Bitmap.Config.ARGB_8888), null)
+                a.findViewById<View>(R.id.startButton).performClick()
+                ShadowLooper.idleMainLooper()
+                val overlay = a.findViewById<View>(R.id.overlayButton)
+                assertEquals(View.VISIBLE, overlay.visibility)
+
+                ShadowSettings.setCanDrawOverlays(false)
+                overlay.performClick()
+                ShadowLooper.idleMainLooper()
+                assertTrue(ShadowDialog.getLatestDialog().isShowing)
+                ShadowDialog.getLatestDialog().dismiss()
+
+                ShadowSettings.setCanDrawOverlays(true)
+                overlay.performClick()
+                ShadowLooper.idleMainLooper()
+                val started = shadowOf(app).nextStartedService
+                assertEquals(OverlayService::class.java.name, started.component!!.className)
             }
         }
     }

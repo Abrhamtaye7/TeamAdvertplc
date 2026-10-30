@@ -9,6 +9,8 @@
     <string name="repeat">Repeat</string>
     <string name="resync">Re-sync</string>
     <string name="more">More</string>
+    <string name="overlay">Overlay</string>
+    <string name="stop">Stop</string>
     <string name="done">Done</string>
     <string name="i_play_white">I play White</string>
     <string name="i_play_black">I play Black</string>
@@ -37,7 +39,14 @@
     <string name="new_game_confirm">Start a new game? The current game will be cleared.</string>
     <string name="promote_to">Promote to</string>
     <string name="help_title">How to use ChessCam</string>
-    <string name="help_text">1. Mount the phone above the board (a tripod or phone stand). The more straight-down the view, the better.\n\n2. Drag the yellow dots onto the 4 outer corners of the board squares. Check the labels: a1 must be on White\'s left. Use Rotate a1 if needed.\n\n3. Choose your colour and tap Start game with all pieces in place.\n\n4. Play normally. Take your hand away after each move. ChessCam spots the move, and on your turn Stockfish says the best reply and draws it as an arrow.\n\n5. If a move is missed or wrong, tap Undo, or tap the move\'s squares on the small board to enter it yourself. Re-sync tells the app the real board is correct as it is now.\n\nGood light and no shadows moving across the board help a lot.</string>
+    <string name="help_text">1. Mount the phone above the board (a tripod or phone stand). The more straight-down the view, the better.\n\n2. Drag the yellow dots onto the 4 outer corners of the board squares. Check the labels: a1 must be on White\'s left. Use Rotate a1 if needed.\n\n3. Choose your colour and tap Start game with all pieces in place.\n\n4. Play normally. Take your hand away after each move. ChessCam spots the move, and on your turn Stockfish says the best reply and draws it as an arrow.\n\n5. If a move is missed or wrong, tap Undo, or tap the move\'s squares on the small board to enter it yourself. Re-sync tells the app the real board is correct as it is now.\n\n6. Overlay keeps ChessCam following the game while you use another app. A see-through board covers the screen: yellow is the piece to move, green is where it goes, faint blue is the opponent\'s last move. The colour of the frame round the screen shows the status: green = your move is shown, amber = thinking, grey = waiting for the opponent, red = lost track (use Re-sync in the notification). Open ChessCam again to end the overlay.\n\nGood light and no shadows moving across the board help a lot.</string>
+    <string name="overlay_voice">Speak moves while the overlay is on</string>
+    <string name="overlay_opacity">Overlay strength: %1$d%%</string>
+    <string name="overlay_channel">Overlay</string>
+    <string name="overlay_title">ChessCam is watching the board</string>
+    <string name="overlay_permission_title">Allow the overlay</string>
+    <string name="overlay_permission_text">To keep following the game while another app is open, ChessCam needs permission to display over other apps. On the next screen, turn on \"Allow display over other apps\" for ChessCam, then come back.</string>
+    <string name="overlay_denied">Without \"Display over other apps\" permission the overlay can\'t be shown.</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
 </resources>

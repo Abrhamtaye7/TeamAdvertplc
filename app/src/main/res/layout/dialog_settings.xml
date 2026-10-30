@@ -50,6 +50,23 @@
             android:layout_height="wrap_content"
             android:max="15" />
 
+        <androidx.appcompat.widget.SwitchCompat
+            android:id="@+id/overlayVoice"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="@string/overlay_voice" />
+
+        <TextView
+            android:id="@+id/overlayOpacityLabel"
+            style="@style/SettingLabel" />
+
+        <SeekBar
+            android:id="@+id/overlayOpacity"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:max="8" />
+
         <TextView
             style="@style/SettingLabel"
             android:text="@string/start_fen" />

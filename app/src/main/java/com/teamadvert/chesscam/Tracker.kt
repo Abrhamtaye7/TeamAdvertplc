@@ -21,7 +21,10 @@ import java.util.concurrent.ConcurrentLinkedQueue
 class Tracker(private val listener: Listener) : ImageAnalysis.Analyzer {
 
     interface Listener {
-        /** A new frame to display. Called on the analysis thread; the bitmap is reused later. */
+        /**
+         * A new frame to display, while [wantFrames] is set. Called on the analysis thread;
+         * the bitmap is reused later.
+         */
         fun onFrame(frame: Bitmap, squareChange: FloatArray?)
 
         /** Called on the analysis thread for each frame checked against [Snapshot.key]. */
@@ -36,6 +39,9 @@ class Tracker(private val listener: Listener) : ImageAnalysis.Analyzer {
 
     /** The position to track, or null while tracking is paused. */
     @Volatile var snapshot: Snapshot? = null
+
+    /** Whether anything is showing the camera picture; when not, frames are not copied for display. */
+    @Volatile var wantFrames = true
 
     val detector = MoveDetector()
 
@@ -64,8 +70,8 @@ class Tracker(private val listener: Listener) : ImageAnalysis.Analyzer {
             val w = image.width
             val h = image.height
             val buffer = plane.buffer
-            val bitmap = displayBitmap(w, h)
-            copyToBitmap(buffer, plane.rowStride, w, h, bitmap)
+            val bitmap = if (wantFrames) displayBitmap(w, h) else null
+            if (bitmap != null) copyToBitmap(buffer, plane.rowStride, w, h, bitmap)
 
             var change: FloatArray? = null
             val c = corners
@@ -81,7 +87,7 @@ class Tracker(private val listener: Listener) : ImageAnalysis.Analyzer {
                     }
                 }
             }
-            listener.onFrame(bitmap, change)
+            if (bitmap != null) listener.onFrame(bitmap, change)
         }
     }
 

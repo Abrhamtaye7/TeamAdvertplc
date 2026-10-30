@@ -4,11 +4,9 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.util.Log
-import android.util.Size
 import android.view.Surface
 import android.view.View
 import android.view.WindowManager
@@ -24,16 +22,11 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
 import androidx.appcompat.widget.SwitchCompat
-import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.resolutionselector.AspectRatioStrategy
-import androidx.camera.core.resolutionselector.ResolutionSelector
-import androidx.camera.core.resolutionselector.ResolutionStrategy
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.core.content.ContextCompat
+import com.teamadvert.chesscam.GameSession.Mode
 import com.teamadvert.chesscam.chess.BISHOP
 import com.teamadvert.chesscam.chess.BLACK
-import com.teamadvert.chesscam.chess.Game
 import com.teamadvert.chesscam.chess.GameStatus
 import com.teamadvert.chesscam.chess.KNIGHT
 import com.teamadvert.chesscam.chess.Move
@@ -43,31 +36,18 @@ import com.teamadvert.chesscam.chess.ROOK
 import com.teamadvert.chesscam.chess.START_FEN
 import com.teamadvert.chesscam.chess.WHITE
 import com.teamadvert.chesscam.chess.colorWord
-import com.teamadvert.chesscam.chess.spokenMove
 import com.teamadvert.chesscam.engine.EngineResult
-import com.teamadvert.chesscam.engine.UciEngine
 import com.teamadvert.chesscam.ui.BoardDiagramView
 import com.teamadvert.chesscam.ui.CameraBoardView
-import com.teamadvert.chesscam.vision.Detection
-import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
-import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.sign
 
-class MainActivity : AppCompatActivity(), Tracker.Listener {
+/** The main screen: camera view, corner setup, the tracked board and controls for a [GameSession]. */
+class MainActivity : AppCompatActivity(), GameSession.Listener {
 
-    private enum class Mode { SETUP, TRACKING, PAUSED, OVER }
-
-    private lateinit var settings: Settings
-    private lateinit var speaker: Speaker
-    private lateinit var tracker: Tracker
-    private var engine: UciEngine? = null
-    private var engineError: String? = null
-    private val analysisExecutor = Executors.newSingleThreadExecutor()
-    private val main = Handler(Looper.getMainLooper())
+    private lateinit var session: GameSession
+    private val settings get() = session.settings
 
     private lateinit var cameraView: CameraBoardView
     private lateinit var diagram: BoardDiagramView
@@ -83,29 +63,27 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
     private lateinit var undoButton: Button
     private lateinit var repeatButton: Button
     private lateinit var resyncButton: Button
+    private lateinit var overlayButton: Button
 
-    private var game = Game()
-    private var mode = Mode.SETUP
-    /** Corners are being moved during a game; detection is paused meanwhile. */
-    private var adjusting = false
-    private var suggestion: EngineResult? = null
-    private var suggestionKey: String? = null
-    private var thinking = false
-    private var detectionText: String? = null
+    private var analysis: ImageAnalysis? = null
+    private var cameraError: String? = null
+    /** Waiting to come back from the "Display over other apps" settings screen. */
+    private var overlayPermissionPending = false
 
     private val cameraPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) startCamera() else hintView.setText(R.string.camera_denied)
+        if (granted) bindCamera() else hintView.setText(R.string.camera_denied)
+    }
+
+    // The overlay works without it, but then its notification (with Undo / Re-sync / Stop) is hidden.
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+        launchOverlay()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        settings = Settings(this)
-        speaker = Speaker(this).also { it.enabled = settings.voice }
-        tracker = Tracker(this)
-        tracker.detector.sensitivity = settings.sensitivity
+        session = GameSession.get(this)
 
         cameraView = findViewById(R.id.camera)
         diagram = findViewById(R.id.diagram)
@@ -121,10 +99,11 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
         undoButton = findViewById(R.id.undoButton)
         repeatButton = findViewById(R.id.repeatButton)
         resyncButton = findViewById(R.id.resyncButton)
+        overlayButton = findViewById(R.id.overlayButton)
 
         cameraView.setNormalizedCorners(settings.corners)
         cameraView.onCornersChanged = { c ->
-            tracker.corners = c
+            session.tracker.corners = c
             settings.corners = cameraView.normalizedCorners()
         }
         diagram.onSquareTapped = ::onSquareTapped
@@ -134,259 +113,109 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
             render()
         }
         rotateButton.setOnClickListener { cameraView.rotateLabels() }
-        startButton.setOnClickListener { if (adjusting) finishAdjusting() else startGame() }
-        pauseButton.setOnClickListener { if (mode == Mode.PAUSED) resume() else pause() }
-        undoButton.setOnClickListener { undo() }
-        repeatButton.setOnClickListener { speaker.repeat() }
-        resyncButton.setOnClickListener { resync() }
+        startButton.setOnClickListener { if (session.adjusting) session.setAdjusting(false) else session.startGame() }
+        pauseButton.setOnClickListener { if (session.mode == Mode.PAUSED) session.resume() else session.pause() }
+        undoButton.setOnClickListener { session.undo() }
+        repeatButton.setOnClickListener { session.repeatLastLine() }
+        resyncButton.setOnClickListener { session.resync() }
+        overlayButton.setOnClickListener { startOverlay() }
         findViewById<Button>(R.id.moreButton).setOnClickListener { showMenu(it) }
 
-        restoreGame()
-        startEngine()
-        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            startCamera()
-        } else {
-            cameraPermission.launch(Manifest.permission.CAMERA)
-        }
-        refreshBoard()
-        render()
+        if (!hasCameraPermission()) cameraPermission.launch(Manifest.permission.CAMERA)
         if (!settings.seenHelp) {
             settings.seenHelp = true
             showHelp()
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        engine?.close()
-        speaker.shutdown()
-        analysisExecutor.shutdown()
+    override fun onStart() {
+        super.onStart()
+        // Coming back to the app ends the overlay; the camera moves back here.
+        if (OverlayService.running) OverlayService.stop(this)
+        session.addListener(this)
+        session.tracker.wantFrames = true
+        if (hasCameraPermission()) bindCamera()
+        onSessionChanged()
     }
 
-    // ---- Camera and engine ----
-
-    private fun startCamera() {
-        val future = ProcessCameraProvider.getInstance(this)
-        future.addListener({
-            try {
-                val provider = future.get()
-                val resolution = ResolutionSelector.Builder()
-                    .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
-                    .setResolutionStrategy(
-                        ResolutionStrategy(Size(1280, 960), ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER),
-                    )
-                    .build()
-                val analysis = ImageAnalysis.Builder()
-                    .setResolutionSelector(resolution)
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                    .setOutputImageRotationEnabled(true)
-                    .setTargetRotation(cameraView.display?.rotation ?: Surface.ROTATION_0)
-                    .build()
-                analysis.setAnalyzer(analysisExecutor, tracker)
-                provider.unbindAll()
-                provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, analysis)
-            } catch (e: Exception) {
-                Log.e(TAG, "camera start failed", e)
-                hintView.text = "Could not open the camera: ${e.message}"
-            }
-        }, ContextCompat.getMainExecutor(this))
-    }
-
-    private fun startEngine() {
-        val exe = File(applicationInfo.nativeLibraryDir, "libstockfish.so")
-        if (!exe.exists()) {
-            engineError = getString(R.string.engine_missing)
-            return
-        }
-        val threads = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 4)
-        engine = UciEngine(listOf(exe.absolutePath)).also { e ->
-            e.start(listOf("Threads" to "$threads", "Hash" to "64")) { message ->
-                main.post {
-                    engineError = message
-                    engine = null
-                    thinking = false
-                    render()
-                }
-            }
+    override fun onResume() {
+        super.onResume()
+        if (overlayPermissionPending) {
+            overlayPermissionPending = false
+            if (android.provider.Settings.canDrawOverlays(this)) startOverlay()
+            else Toast.makeText(this, R.string.overlay_denied, Toast.LENGTH_LONG).show()
         }
     }
 
-    override fun onFrame(frame: Bitmap, squareChange: FloatArray?) {
-        main.post {
-            cameraView.setFrame(frame)
-            cameraView.squareChange = if (settings.showChanges && mode == Mode.TRACKING && !adjusting) squareChange else null
-        }
+    override fun onStop() {
+        super.onStop()
+        session.removeListener(this)
+        session.tracker.wantFrames = false
+        analysis?.let { CameraSetup.unbind(this, it) }
+        analysis = null
     }
 
-    override fun onDetection(detection: Detection, key: String) {
-        main.post { handleDetection(detection, key) }
-    }
+    private fun hasCameraPermission() =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
 
-    // ---- Game flow ----
-
-    private fun positionKey() = "${game.moves.size}:${game.position.fen()}"
-
-    private fun handleDetection(d: Detection, key: String) {
-        if (mode != Mode.TRACKING || adjusting || key != positionKey()) return
-        val text = when (d) {
-            Detection.Moving -> "Hand over the board…"
-            Detection.Settling -> "Checking…"
-            Detection.Synced -> "Board captured."
-            Detection.NoChange -> null
-            is Detection.Unclear -> {
-                if (d.lostTrack) speaker.say("Lost track of the board.", interrupt = true)
-                when {
-                    d.obstructed -> "Many squares look different. Did the board or phone move? Tap Re-sync if the board is correct."
-                    d.lostTrack -> "Lost track. Tap the move on the small board, or Undo / Re-sync."
-                    else -> "Not sure what moved yet…"
-                }
-            }
-            is Detection.Found -> {
-                playMoves(d.moves, fromCamera = true)
-                null
-            }
-        }
-        if (text != detectionText) {
-            detectionText = text
+    private fun bindCamera() {
+        if (analysis != null) return
+        session.cameraRotation = cameraView.display?.rotation ?: Surface.ROTATION_0
+        cameraError = null
+        analysis = CameraSetup.bind(this, this, session) { e ->
+            cameraError = "Could not open the camera: ${e.message}"
             render()
         }
     }
 
-    private fun startGame() {
-        val fresh = game.moves.isEmpty() || game.status() != GameStatus.ONGOING
-        if (fresh) game = Game(settings.startFen)
-        mode = Mode.TRACKING
-        cameraView.editing = false
-        tracker.post { tracker.detector.requestResync() }
-        speaker.say(
-            if (fresh) "New game. You play ${colorWord(settings.myColor)}." else "Continuing the game.",
-            interrupt = true,
-        )
-        saveGame()
-        afterPositionChanged()
+    override fun onFrame(frame: Bitmap, squareChange: FloatArray?) {
+        cameraView.setFrame(frame)
+        cameraView.squareChange =
+            if (settings.showChanges && session.mode == Mode.TRACKING && !session.adjusting) squareChange else null
     }
 
-    private fun pause() {
-        mode = Mode.PAUSED
-        engine?.cancel()
-        thinking = false
-        speaker.stop()
-        updateSnapshot()
-        render()
-    }
-
-    private fun resume() {
-        mode = Mode.TRACKING
-        tracker.post { tracker.detector.requestResync() }
-        afterPositionChanged()
-    }
-
-    private fun resync() {
-        tracker.post { tracker.detector.requestResync() }
-        if (mode == Mode.PAUSED) resume()
-        detectionText = "Re-syncing: keep hands off the board."
-        render()
-    }
-
-    private fun undo() {
-        if (!game.undo()) return
-        if (mode != Mode.SETUP) mode = Mode.PAUSED
-        engine?.cancel()
-        thinking = false
-        suggestion = null
-        saveGame()
+    override fun onSessionChanged() {
+        cameraView.editing = session.mode == Mode.SETUP || session.adjusting
         refreshBoard()
-        updateSnapshot()
         render()
     }
 
-    private fun playMoves(moves: List<Move>, fromCamera: Boolean) {
-        val lines = mutableListOf<String>()
-        val suggested = currentSuggestion()?.bestMove
-        for (m in moves) {
-            val pos = game.position
-            if (!pos.isLegal(m)) break
-            val words = spokenMove(pos, m)
-            val mover = pos.sideToMove
-            game.play(m)
-            if (fromCamera && settings.announceOpponent) {
-                // Say what the camera saw, so a misread move is noticed straight away.
-                if (mover != settings.myColor) lines += "${colorWord(mover)} played $words."
-                else if (m != suggested) lines += "You played $words."
-            }
-        }
-        suggestion = null
-        if (lines.isNotEmpty()) speaker.say(lines.joinToString(" "), interrupt = true)
-        saveGame()
-        afterPositionChanged()
-    }
+    // ---- Overlay ----
 
-    private fun afterPositionChanged() {
-        detectionText = null
-        refreshBoard()
-        val status = game.status()
-        if (status != GameStatus.ONGOING) {
-            if (mode == Mode.TRACKING) speaker.say(resultText(status))
-            mode = Mode.OVER
-            engine?.cancel()
-            thinking = false
-        } else if (mode == Mode.TRACKING && game.position.sideToMove == settings.myColor) {
-            requestSuggestion()
-        } else {
-            engine?.cancel()
-            thinking = false
-        }
-        updateSnapshot()
-        render()
-    }
-
-    private fun requestSuggestion() {
-        val eng = engine ?: return
-        val key = positionKey()
-        val pos = game.position
-        thinking = true
-        eng.search(game.startFen, game.moves.toList(), settings.thinkTimeMs) { result ->
-            main.post {
-                if (key != positionKey() || mode != Mode.TRACKING) return@post
-                thinking = false
-                suggestion = result
-                suggestionKey = key
-                val best = result.bestMove
-                if (best != null && pos.isLegal(best)) {
-                    diagram.arrow = best
-                    speaker.say("Your move: ${spokenMove(pos, best)}.")
+    private fun startOverlay() {
+        if (!android.provider.Settings.canDrawOverlays(this)) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.overlay_permission_title)
+                .setMessage(R.string.overlay_permission_text)
+                .setPositiveButton(R.string.ok) { _, _ ->
+                    overlayPermissionPending = true
+                    startActivity(
+                        Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")),
+                    )
                 }
-                updateSnapshot()
-                render()
-            }
+                .setNegativeButton(R.string.cancel, null)
+                .show()
+            return
         }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+            return
+        }
+        launchOverlay()
     }
 
-    private fun currentSuggestion(): EngineResult? = suggestion?.takeIf { suggestionKey == positionKey() }
-
-    private fun updateSnapshot() {
-        tracker.snapshot = if (mode == Mode.TRACKING && !adjusting) {
-            Tracker.Snapshot(game.position, currentSuggestion()?.bestMove, positionKey())
-        } else {
-            null
-        }
-    }
-
-    private fun resultText(status: GameStatus): String = when (status) {
-        GameStatus.CHECKMATE -> if (game.position.sideToMove == settings.myColor) "Checkmate. You lose." else "Checkmate. You win."
-        GameStatus.STALEMATE -> "Stalemate. The game is a draw."
-        GameStatus.REPETITION -> "Draw by threefold repetition."
-        GameStatus.FIFTY_MOVES -> "Draw by the fifty-move rule."
-        GameStatus.INSUFFICIENT_MATERIAL -> "Draw. Neither side can checkmate."
-        GameStatus.ONGOING -> ""
+    private fun launchOverlay() {
+        OverlayService.start(this)
+        moveTaskToBack(true)
     }
 
     // ---- Manual move entry on the diagram ----
 
     private fun onSquareTapped(sq: Int) {
-        if (mode == Mode.SETUP || mode == Mode.OVER || adjusting) return
-        val pos = game.position
+        if (session.mode == Mode.SETUP || session.mode == Mode.OVER || session.adjusting) return
+        val pos = session.game.position
         val ownPiece = pos[sq] != 0 && pos[sq].sign == pos.sideToMove
         val sel = diagram.selected
         if (sel < 0 || sq == sel || ownPiece) {
@@ -397,24 +226,17 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
         val options = pos.legalMoves().filter { it.from == sel && it.to == sq }
         when {
             options.isEmpty() -> Toast.makeText(this, "That move is not legal here.", Toast.LENGTH_SHORT).show()
-            options.size == 1 -> manualMove(options[0])
+            options.size == 1 -> session.manualMove(options[0])
             else -> {
                 val kinds = intArrayOf(QUEEN, ROOK, BISHOP, KNIGHT)
                 AlertDialog.Builder(this)
                     .setTitle(R.string.promote_to)
                     .setItems(arrayOf("Queen", "Rook", "Bishop", "Knight")) { _, i ->
-                        options.firstOrNull { it.promotion == kinds[i] }?.let { manualMove(it) }
+                        options.firstOrNull { it.promotion == kinds[i] }?.let { session.manualMove(it) }
                     }
                     .show()
             }
         }
-    }
-
-    /** A move entered by hand; the real board is assumed to show it already. */
-    private fun manualMove(move: Move) {
-        tracker.post { tracker.detector.requestResync() }
-        if (mode == Mode.PAUSED) mode = Mode.TRACKING
-        playMoves(listOf(move), fromCamera = false)
     }
 
     // ---- Menu and dialogs ----
@@ -428,7 +250,7 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
         menu.menu.add(0, 5, 4, R.string.menu_help)
         menu.setOnMenuItemClickListener {
             when (it.itemId) {
-                1 -> startAdjusting()
+                1 -> session.setAdjusting(true)
                 2 -> confirmNewGame()
                 3 -> showSettings()
                 4 -> sharePgn()
@@ -439,43 +261,14 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
         menu.show()
     }
 
-    private fun startAdjusting() {
-        if (mode == Mode.SETUP) return
-        adjusting = true
-        cameraView.editing = true
-        updateSnapshot()
-        render()
-    }
-
-    private fun finishAdjusting() {
-        adjusting = false
-        cameraView.editing = false
-        tracker.post { tracker.detector.requestResync() }
-        updateSnapshot()
-        render()
-    }
-
     private fun confirmNewGame() {
-        val reset = {
-            engine?.cancel()
-            thinking = false
-            adjusting = false
-            game = Game(settings.startFen)
-            mode = Mode.SETUP
-            cameraView.editing = true
-            suggestion = null
-            saveGame()
-            refreshBoard()
-            updateSnapshot()
-            render()
-        }
-        if (game.moves.isEmpty()) {
-            reset()
+        if (session.game.moves.isEmpty()) {
+            session.newGame()
             return
         }
         AlertDialog.Builder(this)
             .setMessage(R.string.new_game_confirm)
-            .setPositiveButton(R.string.ok) { _, _ -> reset() }
+            .setPositiveButton(R.string.ok) { _, _ -> session.newGame() }
             .setNegativeButton(R.string.cancel, null)
             .show()
     }
@@ -488,6 +281,9 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
         val showChanges = view.findViewById<SwitchCompat>(R.id.showChanges)
         val sensitivityLabel = view.findViewById<TextView>(R.id.sensitivityLabel)
         val sensitivity = view.findViewById<SeekBar>(R.id.sensitivity)
+        val overlayVoice = view.findViewById<SwitchCompat>(R.id.overlayVoice)
+        val opacityLabel = view.findViewById<TextView>(R.id.overlayOpacityLabel)
+        val opacity = view.findViewById<SeekBar>(R.id.overlayOpacity)
         val startFen = view.findViewById<EditText>(R.id.startFen)
 
         thinkTime.adapter = ArrayAdapter(
@@ -498,14 +294,21 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
         voice.isChecked = settings.voice
         announce.isChecked = settings.announceOpponent
         showChanges.isChecked = settings.showChanges
-        val updateLabel = { p: Int -> sensitivityLabel.text = getString(R.string.sensitivity, 50 + 10 * p) }
+        overlayVoice.isChecked = settings.overlayVoice
         sensitivity.progress = ((settings.sensitivity - 0.5f) * 10).toInt().coerceIn(0, 15)
-        updateLabel(sensitivity.progress)
-        sensitivity.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) = updateLabel(p)
+        opacity.progress = ((settings.overlayOpacity - 0.2f) * 10).toInt().coerceIn(0, 8)
+        val updateLabels = {
+            sensitivityLabel.text = getString(R.string.sensitivity, 50 + 10 * sensitivity.progress)
+            opacityLabel.text = getString(R.string.overlay_opacity, 20 + 10 * opacity.progress)
+        }
+        updateLabels()
+        val onChange = object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(s: SeekBar, p: Int, fromUser: Boolean) = updateLabels()
             override fun onStartTrackingTouch(s: SeekBar) {}
             override fun onStopTrackingTouch(s: SeekBar) {}
-        })
+        }
+        sensitivity.setOnSeekBarChangeListener(onChange)
+        opacity.setOnSeekBarChangeListener(onChange)
         startFen.setText(settings.startFen.takeIf { it != START_FEN } ?: "")
 
         AlertDialog.Builder(this)
@@ -514,24 +317,20 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
             .setPositiveButton(R.string.ok) { _, _ ->
                 settings.thinkTimeMs = THINK_TIMES[thinkTime.selectedItemPosition]
                 settings.voice = voice.isChecked
-                speaker.enabled = voice.isChecked
-                if (!voice.isChecked) speaker.stop()
                 settings.announceOpponent = announce.isChecked
                 settings.showChanges = showChanges.isChecked
+                settings.overlayVoice = overlayVoice.isChecked
                 settings.sensitivity = 0.5f + 0.1f * sensitivity.progress
-                tracker.detector.sensitivity = settings.sensitivity
+                settings.overlayOpacity = 0.2f + 0.1f * opacity.progress
                 val fen = startFen.text.toString().trim().ifEmpty { START_FEN }
                 try {
                     Position.fromFen(fen)
                     settings.startFen = fen
-                    if (mode == Mode.SETUP && game.moves.isEmpty()) {
-                        game = Game(fen)
-                        refreshBoard()
-                    }
+                    session.startPositionChanged()
                 } catch (e: IllegalArgumentException) {
                     Toast.makeText(this, getString(R.string.bad_fen, e.message), Toast.LENGTH_LONG).show()
                 }
-                render()
+                session.settingsChanged()
             }
             .setNegativeButton(R.string.cancel, null)
             .show()
@@ -545,57 +344,27 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
             .show()
     }
 
-    private fun pgn(): String {
-        val me = "Me"
-        val them = "Opponent"
-        val date = SimpleDateFormat("yyyy.MM.dd", Locale.US).format(Date())
-        return if (settings.myColor == WHITE) game.pgn(me, them, date) else game.pgn(them, me, date)
-    }
-
     private fun sharePgn() {
-        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, pgn())
+        val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, session.pgn())
         startActivity(Intent.createChooser(send, getString(R.string.menu_share)))
-    }
-
-    // ---- Persistence ----
-
-    private fun restoreGame() {
-        val saved = settings.savedGame ?: return
-        game = try {
-            Game(saved.first).also { g ->
-                for (uci in saved.second) {
-                    val m = Move.fromUci(uci) ?: break
-                    if (!g.position.isLegal(m)) break
-                    g.play(m)
-                }
-            }
-        } catch (e: IllegalArgumentException) {
-            Game(settings.startFen)
-        }
-    }
-
-    private fun saveGame() {
-        settings.savedGame = game.startFen to game.moves.map { it.uci() }
-        try {
-            File(filesDir, "game.pgn").writeText(pgn())
-        } catch (e: Exception) {
-            Log.w(TAG, "could not write game.pgn", e)
-        }
     }
 
     // ---- Rendering ----
 
     private fun refreshBoard() {
-        diagram.position = game.position
-        diagram.lastMove = game.moves.lastOrNull()
+        diagram.position = session.game.position
+        diagram.lastMove = session.game.moves.lastOrNull()
         diagram.selected = -1
-        diagram.arrow = currentSuggestion()?.bestMove?.takeIf { game.position.isLegal(it) }
+        diagram.arrow = session.suggestedMove()
     }
 
     private fun render() {
         val my = settings.myColor
+        val mode = session.mode
+        val game = session.game
         diagram.flipped = my == BLACK
         val setup = mode == Mode.SETUP
+        val adjusting = session.adjusting
         val editingCorners = setup || adjusting
 
         colorButton.visibility = if (setup) View.VISIBLE else View.GONE
@@ -615,13 +384,14 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
         undoButton.visibility = if (playing && game.moves.isNotEmpty()) View.VISIBLE else View.GONE
         repeatButton.visibility = if (playing) View.VISIBLE else View.GONE
         resyncButton.visibility = if (playing && mode != Mode.OVER) View.VISIBLE else View.GONE
+        overlayButton.visibility = if (playing && mode != Mode.OVER) View.VISIBLE else View.GONE
 
-        hintView.text = when {
+        hintView.text = cameraError ?: when {
             setup -> getString(R.string.setup_hint)
             adjusting -> getString(R.string.adjust_hint)
             mode == Mode.PAUSED -> getString(R.string.paused_hint)
-            mode == Mode.OVER -> resultText(game.status())
-            else -> detectionText ?: getString(R.string.tracking_hint)
+            mode == Mode.OVER -> session.resultText()
+            else -> session.detectionText ?: getString(R.string.tracking_hint)
         }
 
         val pos = game.position
@@ -629,18 +399,18 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
         statusView.text = when (mode) {
             Mode.SETUP -> "Set up the camera. You play ${colorWord(my)}."
             Mode.PAUSED -> "Paused"
-            Mode.OVER -> resultText(game.status())
+            Mode.OVER -> session.resultText()
             Mode.TRACKING -> when {
                 adjusting -> "Adjusting corners"
-                toMove == my -> if (thinking) "Your move: thinking…" else "Your move"
+                toMove == my -> if (session.thinking) "Your move: thinking…" else "Your move"
                 else -> "Waiting for ${colorWord(toMove)}'s move"
             }
-        } + (engineError?.let { "\n$it" } ?: "")
+        } + (session.engineError?.let { "\n$it" } ?: "")
 
-        val s = currentSuggestion()
-        val best = s?.bestMove?.takeIf { pos.isLegal(it) }
-        suggestionView.text = if (best != null && mode != Mode.SETUP) pos.san(best) else ""
-        evaluationView.text = if (best != null && mode != Mode.SETUP) evaluationText(s) else ""
+        val s = session.currentSuggestion()
+        val best = session.suggestedMove()
+        suggestionView.text = if (best != null && !setup) pos.san(best) else ""
+        evaluationView.text = if (best != null && s != null && !setup) evaluationText(s) else ""
         moveListView.text = game.moveText()
     }
 
@@ -656,7 +426,6 @@ class MainActivity : AppCompatActivity(), Tracker.Listener {
     }
 
     companion object {
-        private const val TAG = "ChessCam"
         private val THINK_TIMES = listOf(500, 1000, 2000, 3000, 5000)
     }
 }

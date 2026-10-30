@@ -128,6 +128,11 @@
                 android:text="@string/resync" />
 
             <Button
+                android:id="@+id/overlayButton"
+                style="@style/BarButton.Primary"
+                android:text="@string/overlay" />
+
+            <Button
                 android:id="@+id/moreButton"
                 style="@style/BarButton"
                 android:text="@string/more" />
