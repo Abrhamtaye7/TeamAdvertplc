@@ -88,6 +88,10 @@ The GitHub Actions workflow in `.github/workflows/android.yml` does the same on 
 
 Every build is signed with the shared, non-secret `app/debug.keystore`, so any build can update an installed copy. Sign with your own key before publishing the app anywhere.
 
+### Coding agent tools
+
+`.mcp.json` registers [REA](https://github.com/morluto/rea) (`rea-agents@6.8.0`), a reverse-engineering MCP server, for Claude Code. `.claude/skills/reverse-engineer-anything/` holds the matching skill. Claude Code asks once before it starts a server from `.mcp.json`; approve `rea` when asked. To update both, run `npx rea-agents@latest setup --client claude_code`, then copy `~/.claude/skills/reverse-engineer-anything` here and set the same version in `.mcp.json`.
+
 ## Limitations
 
 - **Testing so far:** the detector has only been tested on synthetic camera frames (perspective board, pieces that lean, pixel noise, a moving hand), not yet on a real board.
